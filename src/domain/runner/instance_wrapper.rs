@@ -1,7 +1,6 @@
 use crate::domain::runner::MAX_MEMORY_SIZE;
 use wasmer::{
-    AsStoreMut, AsStoreRef, ExportError, Function, Instance, Memory, MemoryAccessError,
-    Value,
+    AsStoreMut, AsStoreRef, ExportError, Function, Instance, Memory, MemoryAccessError, Value,
 };
 use wasmer_middlewares::metering::{get_remaining_points, set_remaining_points, MeteringPoints};
 
@@ -27,12 +26,33 @@ impl InstanceWrapper {
         Ok(result)
     }
 
-    pub fn is_out_of_memory(&self, store: &(impl AsStoreRef + ?Sized)) -> Result<bool, MemoryAccessError> {
+    pub fn is_out_of_memory(
+        &self,
+        store: &(impl AsStoreRef + ?Sized),
+    ) -> Result<bool, MemoryAccessError> {
         let memory = Self::get_memory(&self.instance);
         let view = memory.view(store);
         let size = view.data_size();
 
         Ok(MAX_MEMORY_SIZE <= size)
+    }
+
+    pub fn read_arraybuffer(
+        &self,
+        store: &(impl AsStoreRef + ?Sized),
+        ptr: u32,
+    ) -> Result<Vec<u8>, MemoryAccessError> {
+        let memory = Self::get_memory(&self.instance);
+        let view = memory.view(store);
+        if ptr < 4 {
+            return Err(MemoryAccessError::HeapOutOfBounds);
+        }
+        let mut length_buffer: Vec<u8> = vec![0; 4];
+        view.read((ptr - 4) as u64, &mut length_buffer)?;
+        let length = u32::from_le_bytes(length_buffer.try_into().unwrap());
+        let mut result: Vec<u8> = vec![0; length as usize];
+        view.read(ptr as u64, &mut result)?;
+        Ok(result)
     }
 
     pub fn read_memory(
