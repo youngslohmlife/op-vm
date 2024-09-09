@@ -1,6 +1,7 @@
 use crate::domain::runner::MAX_MEMORY_SIZE;
 use wasmer::{
-    AsStoreMut, AsStoreRef, ExportError, Function, Instance, Memory, MemoryAccessError, Value,
+    AsStoreMut, AsStoreRef, ExportError, Function, Instance, Memory, MemoryAccessError,
+    MemoryError, Value,
 };
 use wasmer_middlewares::metering::{get_remaining_points, set_remaining_points, MeteringPoints};
 
@@ -78,6 +79,15 @@ impl InstanceWrapper {
         let memory = Self::get_memory(&self.instance);
         let view = memory.view(store);
         view.read_u8(offset)
+    }
+
+    pub fn prep_for_cache(&self, store: &mut impl AsStoreMut) -> Result<(), MemoryError> {
+        self.instance
+            .exports
+            .get_memory("memory")
+            .unwrap()
+            .reset(store)?;
+        Ok(())
     }
 
     pub fn write_memory(

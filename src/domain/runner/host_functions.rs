@@ -1,7 +1,6 @@
-use std::collections::{HashMap, HashSet};
-use std::io::Read;
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use wasmer::{AsStoreRef, FunctionEnvMut, RuntimeError, StoreMut};
+use wasmer::{AsStoreMut, FunctionEnvMut, RuntimeError};
 
 use crate::domain::assembly_script::AssemblyScript;
 use crate::interfaces::ExternalFunction;
@@ -18,6 +17,18 @@ pub fn __instantiate_cache() {
     }
 }
 
+pub fn __write_to_cache(
+    key: &Vec<u8>,
+    _instance: &InstanceWrapper,
+    store: &mut impl AsStoreMut,
+) -> anyhow::Result<()> {
+    let mut cache = get_cache()?;
+    let instance = _instance.clone();
+    instance.prep_for_cache(store)?;
+    cache.insert(key.clone(), instance);
+    Ok(())
+}
+
 //stub
 pub fn __request_load(mut context: FunctionEnvMut<CustomEnv>) -> anyhow::Result<u32> {
     Ok(0)
@@ -32,22 +43,27 @@ pub fn __load(
     Ok(())
 }
 
-pub fn read_cache(key: &Vec<u8>) -> anyhow::Result<InstanceWrapper> {
+pub fn get_cache() -> anyhow::Result<HashMap<Vec<u8>, InstanceWrapper>> {
     unsafe {
         match _RUNTIME_CACHE.as_ref() {
             Some(_cache) => {
                 let cache = _cache
                     .lock()
-                    .map_err(|_e| anyhow::anyhow!("failed to lock cache"))?
+                    .map_err(|_e| anyhow::anyhow!("failed to get cache lock"))?
                     .clone();
-                let instance = cache
-                    .get(key)
-                    .ok_or(anyhow::anyhow!("contract not found in cache"))?;
-                Ok(instance.clone())
+                Ok(cache)
             }
             None => Err(anyhow::anyhow!("cache uninitialized")),
         }
     }
+}
+
+pub fn read_cache(key: &Vec<u8>) -> anyhow::Result<InstanceWrapper> {
+    let cache = get_cache()?;
+    let instance = cache
+        .get(key)
+        .ok_or(anyhow::anyhow!("contract not found in cache"))?;
+    Ok(instance.clone())
 }
 
 pub fn __call(
@@ -70,13 +86,13 @@ pub fn __call(
         .read_arraybuffer(&store, _calldata)
         .map_err(|_e| RuntimeError::new("Error reading arraybuffer"))?;
 
-    //TODO: result returns the same format as env.call_other_contract_external does:
-    //the first 8 bytes for the cost, the rest as the data
-    //replicates older behavior if it doesnt find the contract instance in the cache
-    //add contract to cache if used
     let v: Vec<u8> = vec![0; 10];
     let result = match contract_instance {
-        Some(contract) => &v,
+        Some(contract) => {
+            //@TODO write this out properly
+            let ctr = contract.call(&mut store, "call", &[]);
+            &v
+        }
         None => &env.call_other_contract_external.execute(&calldata)?,
     };
 
