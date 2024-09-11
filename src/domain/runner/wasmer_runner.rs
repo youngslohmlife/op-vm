@@ -2,13 +2,20 @@ use bytes::Bytes;
 use chrono::Local;
 use std::sync::Arc;
 use wasmer::sys::{BaseTunables, EngineBuilder};
-use wasmer::{imports, CompilerConfig, Function, FunctionEnv, Imports, Instance, MemoryAccessError, Module, Store, Value};
+use wasmer::{
+    imports, CompilerConfig, Function, FunctionEnv, Imports, Instance, MemoryAccessError, Module,
+    Store, Value,
+};
 use wasmer_compiler_singlepass::Singlepass;
 use wasmer_middlewares::Metering;
 use wasmer_types::{SerializeError, Target};
 
 use crate::domain::assembly_script::AssemblyScript;
-use crate::domain::runner::{abort_import, call_other_contract_import, console_log_import, deploy_from_address_import, encode_address_import, sha256_import, storage_load_import, storage_store_import, AbortData, ContractRunner, CustomEnv, InstanceWrapper};
+use crate::domain::runner::{
+    abort_import, call_other_contract_import, console_log_import, deploy_from_address_import,
+    encode_address_import, sha256_import, storage_load_import, storage_store_import, AbortData,
+    ContractRunner, CustomEnv, InstanceWrapper,
+};
 use crate::domain::vm::{get_gas_cost, log_time_diff, LimitingTunables};
 
 use crate::domain::runner::constants::{MAX_GAS_CONSTRUCTOR, MAX_PAGES, STACK_SIZE};
@@ -63,7 +70,11 @@ impl WasmerRunner {
         Ok(serialized)
     }
 
-    pub unsafe fn from_serialized(serialized: Bytes, max_gas: u64, custom_env: CustomEnv) -> anyhow::Result<Self> {
+    pub unsafe fn from_serialized(
+        serialized: Bytes,
+        max_gas: u64,
+        custom_env: CustomEnv,
+    ) -> anyhow::Result<Self> {
         let time = Local::now();
 
         let store = Self::create_engine()?;
@@ -110,7 +121,8 @@ impl WasmerRunner {
             }
         })?;
 
-        let instance_wrapper = InstanceWrapper::new(instance.clone());
+        let mut instance_wrapper = InstanceWrapper::new(instance.clone());
+        instance_wrapper.init_storage(&mut store)?;
         env.as_mut(&mut store).instance = Some(instance_wrapper.clone());
 
         let mut imp = Self {
@@ -145,9 +157,7 @@ impl WasmerRunner {
         engine.set_tunables(tunables);
 
         let store = Store::new(engine);
-        Ok(
-            store
-        )
+        Ok(store)
     }
 }
 

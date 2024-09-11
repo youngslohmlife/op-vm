@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use wasmer::{AsStoreMut, FunctionEnvMut, RuntimeError};
+use wasmer::{AsStoreMut, FunctionEnvMut, RuntimeError, StoreMut};
 
 use crate::domain::assembly_script::AssemblyScript;
 use crate::interfaces::ExternalFunction;
@@ -29,17 +29,30 @@ pub fn __write_to_cache(
     Ok(())
 }
 
-//stub
-pub fn __request_load(mut context: FunctionEnvMut<CustomEnv>) -> anyhow::Result<u32> {
-    Ok(0)
+// request for size to get allocated
+pub fn __request_load(mut context: FunctionEnvMut<CustomEnv>, key: u64) -> anyhow::Result<u64> {
+    let (env, mut store) = context.data_and_store_mut();
+    let instance = &env
+        .instance
+        .clone()
+        .ok_or("could not get instance")
+        .unwrap();
+    Ok(instance.request_storage(&mut store, key)?)
 }
 
 //stub
 pub fn __load(
     mut context: FunctionEnvMut<CustomEnv>,
-    key: u32,
-    ptr_start: u32,
+    key: u64,
+    ptr_start: u64,
 ) -> anyhow::Result<()> {
+    let (env, mut store) = context.data_and_store_mut();
+    let instance = &env
+        .instance
+        .clone()
+        .ok_or("could not get instance")
+        .unwrap();
+    instance.load_from_storage(&mut store, key, ptr_start)?;
     Ok(())
 }
 
@@ -78,12 +91,12 @@ pub fn __call(
         .ok_or(RuntimeError::new("Instance not found"))?;
     instance.use_gas(&mut store, CALL_COST);
     let address = instance
-        .read_arraybuffer(&store, _address)
+        .read_arraybuffer(&store, _address as u64, "memory")
         .map_err(|_e| RuntimeError::new("Error reading arraybuffer"))?;
     let contract_instance = read_cache(&address).ok();
 
     let calldata = instance
-        .read_arraybuffer(&store, _calldata)
+        .read_arraybuffer(&store, _calldata as u64, "memory")
         .map_err(|_e| RuntimeError::new("Error reading arraybuffer"))?;
 
     let v: Vec<u8> = vec![0; 10];
