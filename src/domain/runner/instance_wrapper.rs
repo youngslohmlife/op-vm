@@ -1,18 +1,24 @@
+use std::collections::HashMap;
+
 use crate::domain::runner::MAX_MEMORY_SIZE;
 use wasmer::{
     AsStoreMut, AsStoreRef, ExportError, Function, Instance, Memory, MemoryAccessError,
-    MemoryError, MemoryType, MemoryView, Pages, Value,
+    MemoryError, MemoryType, MemoryView, Value,
 };
 use wasmer_middlewares::metering::{get_remaining_points, set_remaining_points, MeteringPoints};
 
 #[derive(Clone)]
 pub struct InstanceWrapper {
     instance: Instance,
+    storage: HashMap<Vec<u8>, Vec<u8>>,
 }
 
 impl InstanceWrapper {
     pub fn new(instance: Instance) -> Self {
-        Self { instance }
+        Self {
+            instance,
+            storage: HashMap::<Vec<u8>, Vec<u8>>::new(),
+        }
     }
 
     pub fn call(
@@ -55,9 +61,8 @@ impl InstanceWrapper {
         &self,
         store: &(impl AsStoreRef + ?Sized),
         ptr: u64,
-        memory: &str,
     ) -> Result<Vec<u8>, MemoryAccessError> {
-        let memory = Self::get_memory_from(&self.instance, memory);
+        let memory = Self::get_memory(&self.instance);
         let view = memory.view(store);
         let length = self.read_arraybuffer_len(ptr, &view)?;
         let mut result: Vec<u8> = vec![0; length as usize];
@@ -90,26 +95,19 @@ impl InstanceWrapper {
         view.read_u8(offset)
     }
 
-    pub fn prep_for_cache(&self, store: &mut impl AsStoreMut) -> Result<(), MemoryError> {
+    pub fn _prep_for_cache(&self, store: &mut impl AsStoreMut) -> Result<(), MemoryError> {
         let memory = Self::get_memory(&self.instance);
         memory.reset(store)?;
         Ok(())
     }
 
-    pub fn init_storage(&mut self, store: &mut impl AsStoreMut) -> anyhow::Result<()> {
-        self.instance.exports.insert(
-            "storage",
-            Memory::new(store, MemoryType::new(1, None, false)).unwrap(),
-        );
-        Ok(())
-    }
-
     pub fn request_storage(&self, store: &mut impl AsStoreMut, key: u64) -> anyhow::Result<u64> {
-        let storage = Self::get_storage(&self.instance);
-        let storage_view = storage.view(store);
-        let length = self.read_arraybuffer_len(key, &storage_view)?;
-        let ptr = self.get_write_offset_for_size(store, length as u64, "memory")?;
-        Ok(ptr)
+        let data = self.read_arraybuffer(&store, key)?;
+        let mut len = 0;
+        if self.storage.contains_key(&data) {
+            len = self.storage.get(&data).unwrap().len();
+        }
+        Ok(len as u64)
     }
 
     pub fn load_from_storage(
@@ -118,25 +116,9 @@ impl InstanceWrapper {
         key: u64,
         ptr_start: u64,
     ) -> anyhow::Result<()> {
-        let data = self.read_arraybuffer(store, key, "storage")?;
+        let data = self.read_arraybuffer(store, key)?;
         self.write_memory(store, ptr_start, data.as_slice())?;
         Ok(())
-    }
-
-    pub fn get_write_offset_for_size(
-        &self,
-        store: &mut impl AsStoreMut,
-        data_size: u64,
-        memory: &str,
-    ) -> Result<u64, MemoryError> {
-        let memory = Self::get_memory_from(&self.instance, memory);
-        let size = memory.view(store).data_size();
-        let total = size + data_size;
-        if total > MAX_MEMORY_SIZE {
-            return Err(MemoryError::Generic("could not provision".to_string()));
-        }
-        memory.grow_at_least(store, total)?;
-        Ok(size)
     }
 
     pub fn write_memory(
@@ -150,16 +132,6 @@ impl InstanceWrapper {
         view.write(offset, data)
     }
 
-    pub fn write_storage(
-        &self,
-        store: &(impl AsStoreRef + ?Sized),
-        offset: u64,
-        data: &[u8],
-    ) -> Result<(), MemoryAccessError> {
-        let memory = Self::get_storage(&self.instance);
-        let view = memory.view(store);
-        view.write(offset, data)
-    }
     pub fn use_gas(&self, store: &mut impl AsStoreMut, gas_cost: u64) {
         let gas_before = self.get_remaining_gas(store);
 
@@ -186,13 +158,6 @@ impl InstanceWrapper {
 
     fn get_memory(instance: &Instance) -> &Memory {
         instance.exports.get_memory("memory").unwrap()
-    }
-
-    fn get_storage(instance: &Instance) -> &Memory {
-        instance.exports.get_memory("storage").unwrap()
-    }
-    fn get_memory_from<'a>(instance: &'a Instance, ty: &str) -> &'a Memory {
-        instance.exports.get_memory(ty).unwrap()
     }
     fn get_function<'a>(
         instance: &'a Instance,

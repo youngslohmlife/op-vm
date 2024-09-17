@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use wasmer::{AsStoreMut, FunctionEnvMut, RuntimeError, StoreMut};
+use wasmer::{AsStoreMut, FunctionEnvMut, RuntimeError};
 
 use crate::domain::assembly_script::AssemblyScript;
 use crate::interfaces::ExternalFunction;
@@ -17,46 +17,19 @@ pub fn __instantiate_cache() {
     }
 }
 
-pub fn __write_to_cache(
+pub fn _write_to_cache(
     key: &Vec<u8>,
     _instance: &InstanceWrapper,
     store: &mut impl AsStoreMut,
 ) -> anyhow::Result<()> {
-    let mut cache = get_cache()?;
+    let mut cache = __get_cache()?;
     let instance = _instance.clone();
-    instance.prep_for_cache(store)?;
+    instance._prep_for_cache(store)?;
     cache.insert(key.clone(), instance);
     Ok(())
 }
 
-// request for size to get allocated
-pub fn __request_load(mut context: FunctionEnvMut<CustomEnv>, key: u64) -> anyhow::Result<u64> {
-    let (env, mut store) = context.data_and_store_mut();
-    let instance = &env
-        .instance
-        .clone()
-        .ok_or("could not get instance")
-        .unwrap();
-    Ok(instance.request_storage(&mut store, key)?)
-}
-
-//stub
-pub fn __load(
-    mut context: FunctionEnvMut<CustomEnv>,
-    key: u64,
-    ptr_start: u64,
-) -> anyhow::Result<()> {
-    let (env, mut store) = context.data_and_store_mut();
-    let instance = &env
-        .instance
-        .clone()
-        .ok_or("could not get instance")
-        .unwrap();
-    instance.load_from_storage(&mut store, key, ptr_start)?;
-    Ok(())
-}
-
-pub fn get_cache() -> anyhow::Result<HashMap<Vec<u8>, InstanceWrapper>> {
+fn __get_cache() -> anyhow::Result<HashMap<Vec<u8>, InstanceWrapper>> {
     unsafe {
         match _RUNTIME_CACHE.as_ref() {
             Some(_cache) => {
@@ -71,15 +44,45 @@ pub fn get_cache() -> anyhow::Result<HashMap<Vec<u8>, InstanceWrapper>> {
     }
 }
 
-pub fn read_cache(key: &Vec<u8>) -> anyhow::Result<InstanceWrapper> {
-    let cache = get_cache()?;
+fn __read_cache(key: &Vec<u8>) -> anyhow::Result<InstanceWrapper> {
+    let cache = __get_cache()?;
     let instance = cache
         .get(key)
         .ok_or(anyhow::anyhow!("contract not found in cache"))?;
     Ok(instance.clone())
 }
 
-pub fn __call(
+// request for size to get allocated
+pub fn request_load(mut context: FunctionEnvMut<CustomEnv>, key: u64) -> Result<u64, RuntimeError> {
+    let (env, mut store) = context.data_and_store_mut();
+    let instance = &env
+        .instance
+        .clone()
+        .ok_or("could not get instance")
+        .unwrap();
+    Ok(instance
+        .request_storage(&mut store, key)
+        .map_err(|e| RuntimeError::new(e.to_string()))?)
+}
+
+pub fn load(
+    mut context: FunctionEnvMut<CustomEnv>,
+    key: u64,
+    ptr_start: u64,
+) -> Result<(), RuntimeError> {
+    let (env, mut store) = context.data_and_store_mut();
+    let instance = &env
+        .instance
+        .clone()
+        .ok_or("could not get instance")
+        .unwrap();
+    instance
+        .load_from_storage(&mut store, key, ptr_start)
+        .map_err(|e| RuntimeError::new(e.to_string()))?;
+    Ok(())
+}
+
+pub fn call(
     mut context: FunctionEnvMut<CustomEnv>,
     _address: u32,
     _calldata: u32,
@@ -91,12 +94,12 @@ pub fn __call(
         .ok_or(RuntimeError::new("Instance not found"))?;
     instance.use_gas(&mut store, CALL_COST);
     let address = instance
-        .read_arraybuffer(&store, _address as u64, "memory")
+        .read_arraybuffer(&store, _address as u64)
         .map_err(|_e| RuntimeError::new("Error reading arraybuffer"))?;
-    let contract_instance = read_cache(&address).ok();
+    let contract_instance = __read_cache(&address).ok();
 
     let calldata = instance
-        .read_arraybuffer(&store, _calldata as u64, "memory")
+        .read_arraybuffer(&store, _calldata as u64)
         .map_err(|_e| RuntimeError::new("Error reading arraybuffer"))?;
 
     let v: Vec<u8> = vec![0; 10];

@@ -11,6 +11,7 @@ use wasmer_middlewares::Metering;
 use wasmer_types::{SerializeError, Target};
 
 use crate::domain::assembly_script::AssemblyScript;
+use crate::domain::runner::host_functions::{call, load, request_load};
 use crate::domain::runner::{
     abort_import, call_other_contract_import, console_log_import, deploy_from_address_import,
     encode_address_import, sha256_import, storage_load_import, storage_store_import, AbortData,
@@ -110,6 +111,8 @@ impl WasmerRunner {
                 "encodeAddress" => import!(encode_address_import),
                 "sha256" => import!(sha256_import),
                 "log" => import!(console_log_import),
+                "request_load_storage" => import!(request_load),
+                "load_storage" => import!(load),
             }
         };
 
@@ -121,8 +124,7 @@ impl WasmerRunner {
             }
         })?;
 
-        let mut instance_wrapper = InstanceWrapper::new(instance.clone());
-        instance_wrapper.init_storage(&mut store)?;
+        let instance_wrapper = InstanceWrapper::new(instance.clone());
         env.as_mut(&mut store).instance = Some(instance_wrapper.clone());
 
         let mut imp = Self {
