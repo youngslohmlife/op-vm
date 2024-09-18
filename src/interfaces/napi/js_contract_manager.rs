@@ -10,58 +10,83 @@ use crate::interfaces::napi::contract::JsContractParameter;
 use crate::interfaces::napi::js_contract::JsContract;
 use crate::interfaces::{AbortDataResponse, ContractCallTask};
 
+macro_rules! create_tsfn {
+    ($id:ident) => {
+        $id.create_threadsafe_function(10, |ctx| Ok(vec![ctx.value]))?
+    };
+}
+
+macro_rules! abort_tsfn {
+    ($id:expr, $env:expr) => {
+        if !$id.aborted() {
+            $id.clone().abort()?;
+        }
+
+        $id.unref(&$env)
+            .map_err(|e| Error::from_reason(format!("{:?}", e)))?;
+    };
+}
+
 #[napi(js_name = "ContractManager")]
 pub struct ContractManager {
     contracts: HashMap<u64, JsContract>,
     contract_cache: HashMap<String, Bytes>,
     next_id: u64,
+    storage_load_tsfn: ThreadsafeFunction<ThreadSafeJsImportResponse, ErrorStrategy::CalleeHandled>,
+    storage_store_tsfn:
+        ThreadsafeFunction<ThreadSafeJsImportResponse, ErrorStrategy::CalleeHandled>,
+    call_other_contract_tsfn:
+        ThreadsafeFunction<ThreadSafeJsImportResponse, ErrorStrategy::CalleeHandled>,
+    deploy_from_address_tsfn:
+        ThreadsafeFunction<ThreadSafeJsImportResponse, ErrorStrategy::CalleeHandled>,
+    console_log_tsfn: ThreadsafeFunction<ThreadSafeJsImportResponse, ErrorStrategy::CalleeHandled>
 }
+
 
 #[napi]
 impl ContractManager {
     #[napi(constructor)]
-    pub fn new() -> Self {
+    pub fn new(
+      storage_load_js_function: JsFunction
+      #[napi(
+        ts_arg_type = "(_: never, result: ThreadSafeJsImportResponse) => Promise<Buffer | Uint8Array>"
+      )],
+      storage_store_js_function: JsFunction,
+      #[napi(
+        ts_arg_type = "(_: never, result: ThreadSafeJsImportResponse) => Buffer | Uint8Array"
+      )],
+      call_other_contract_js_function: JsFunction,
+      #[napi(
+        ts_arg_type = "(_: never, result: ThreadSafeJsImportResponse) => Promise<Buffer | Uint8Array>"
+      )],
+      deploy_from_address_js_function: JsFunction,
+      #[napi(
+        ts_arg_type = "(_: never, result: ThreadSafeJsImportResponse) => Promise<void>"
+      )],
+      console_log_js_function: JsFunction
+      #[napi(
+        ts_arg_type = "(_: never, result: ThreadSafeJsImportResponse) => Buffer | Uint8Array"
+      )]) {
         ContractManager {
             contracts: HashMap::new(),
             contract_cache: HashMap::new(),
             next_id: 1, // Start the ID counter at 1 (or 0, if preferred)
+            storage_load_tsfn: create_tsfn!(storage_load_js_function),
+            storage_store_tsfn: create_tsfn!(storage_store_js_function),
+            call_other_contract_tsfn: create_tsfn!(call_other_contract_js_function),
+            deploy_from_address_tsfn: create_tsfn!(deploy_from_address_js_function),
+i           console_log_tsfn: create_tsfn!(console_log_js_function)
         }
     }
-
     #[napi]
-    pub fn instantiate(&mut self, address: String, bytecode: Option<Buffer>,
-                       max_gas: BigInt, network: BitcoinNetworkRequest, #[napi(
-            ts_arg_type = "(_: never, result: ThreadSafeJsImportResponse) => Promise<Buffer | Uint8Array>"
-        )]
-                       storage_load_js_function: JsFunction,
-                       #[napi(
-                           ts_arg_type = "(_: never, result: ThreadSafeJsImportResponse) => Promise<Buffer | Uint8Array>"
-                       )]
-                       storage_store_js_function: JsFunction,
-                       #[napi(
-                           ts_arg_type = "(_: never, result: ThreadSafeJsImportResponse) => Promise<Buffer | Uint8Array>"
-                       )]
-                       call_other_contract_js_function: JsFunction,
-                       #[napi(
-                           ts_arg_type = "(_: never, result: ThreadSafeJsImportResponse) => Promise<Buffer | Uint8Array>"
-                       )]
-                       deploy_from_address_js_function: JsFunction,
-                       #[napi(
-                           ts_arg_type = "(_: never, result: ThreadSafeJsImportResponse) => Promise<void>"
-                       )]
-                       console_log_js_function: JsFunction) -> Result<BigInt, Error> {
+    pub fn instantiate(&mut self, address: String, bytecode: Option<Buffer>, max_gas: BigInt, network: BitcoinNetworkRequest) -> Result<BigInt, Error> {
         let max_gas = max_gas.get_u64().1;
 
         let mut params: JsContractParameter = JsContractParameter {
             bytecode: None,
             serialized: None,
             max_gas,
-            network,
-            storage_load_js_function,
-            storage_store_js_function,
-            call_other_contract_js_function,
-            deploy_from_address_js_function,
-            console_log_js_function,
+            network
         };
 
         let mut should_cache: bool = false;
@@ -75,12 +100,11 @@ impl ContractManager {
             params.bytecode = Some(bytecode);
         }
 
-        let js_contract: JsContract = JsContract::from(params)?;
+        let js_contract: JsContract = JsContract::from(self, params)?;
         if should_cache {
             let serialized = js_contract.serialize()?;
             self.contract_cache.insert(address, serialized);
         }
-
         let id = self.add_contract(js_contract)?;
         Ok(BigInt::from(id))
     }
@@ -129,6 +153,7 @@ impl ContractManager {
 
         let id = self.next_id;
         self.next_id += 1;
+        contract.set_id(id);
         self.contracts.insert(id, contract);
 
         Ok(id)
