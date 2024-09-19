@@ -1,9 +1,9 @@
 use napi::threadsafe_function::{ErrorStrategy, ThreadsafeFunction};
 use wasmer::RuntimeError;
 
-use crate::interfaces::ExternalFunction;
 use crate::interfaces::napi::external_functions::GenericExternalFunction;
 use crate::interfaces::napi::thread_safe_js_import_response::ThreadSafeJsImportResponse;
+use crate::interfaces::ExternalFunction;
 
 pub struct DeployFromAddressExternalFunction {
     external_function: GenericExternalFunction,
@@ -20,9 +20,9 @@ impl DeployFromAddressExternalFunction {
 }
 
 impl ExternalFunction for DeployFromAddressExternalFunction {
-    fn execute(&self, data: &[u8]) -> Result<Vec<u8>, RuntimeError> {
+    fn execute(&self, id: u64, data: &[u8]) -> Result<Vec<u8>, RuntimeError> {
         //let time = chrono::offset::Local::now();
-        let resp = self.external_function.execute(data);
+        let resp = self.external_function.execute(id, data);
 
         //log_time_diff(&time, "GenericExternalFunction::deploy");
 

@@ -2,7 +2,6 @@ use bytes::Bytes;
 use chrono::Local;
 use napi::bindgen_prelude::*;
 use napi::bindgen_prelude::{Array, BigInt, Buffer, Undefined};
-use napi::threadsafe_function::{ErrorStrategy, ThreadsafeFunction};
 use napi::Env;
 use napi::Error;
 use napi::JsNumber;
@@ -15,88 +14,61 @@ use crate::application::contract::ContractService;
 use crate::domain::runner::{CustomEnv, WasmerRunner};
 use crate::domain::vm::log_time_diff;
 use crate::interfaces::napi::contract::JsContractParameter;
-use crate::interfaces::napi::thread_safe_js_import_response::ThreadSafeJsImportResponse;
-use crate::interfaces::{
-    AbortDataResponse, CallOtherContractExternalFunction, ConsoleLogExternalFunction,
-    ContractCallTask, DeployFromAddressExternalFunction,
-    StorageLoadExternalFunction, StorageStoreExternalFunction,
-};
+use crate::interfaces::{AbortDataResponse, ContractCallTask};
 
-
-pub struct JsContract<'a> {
+pub struct JsContract {
     id: u64,
-    contract_manager: &'a ContractManager,
     runner: Arc<Mutex<WasmerRunner>>,
     contract: Arc<Mutex<ContractService>>,
 }
 
 impl JsContract {
-    pub fn set_id(id: u64) -> () {
-      self.id = id;
+    pub fn set_id(&mut self, id: u64) -> () {
+        self.id = id;
     }
-    pub fn validate_bytecode(bytecode: Buffer,
-                             max_gas: BigInt) -> Result<bool> {
+    pub fn validate_bytecode(bytecode: Buffer, max_gas: BigInt) -> Result<bool> {
         catch_unwind(|| {
             let time = Local::now();
             let bytecode_vec = bytecode.to_vec();
             let max_gas = max_gas.get_u64().1;
 
-            let is_valid = WasmerRunner::validate_bytecode(
-                &bytecode_vec,
-                max_gas,
-            ).map_err(|e| Error::from_reason(format!("{:?}", e)))?;
+            let is_valid = WasmerRunner::validate_bytecode(&bytecode_vec, max_gas)
+                .map_err(|e| Error::from_reason(format!("{:?}", e)))?;
 
             log_time_diff(&time, "JsContract::validate");
 
             Ok(is_valid)
         })
-            .unwrap_or_else(|e| Err(Error::from_reason(format!("{:?}", e)))
-            )
+        .unwrap_or_else(|e| Err(Error::from_reason(format!("{:?}", e))))
     }
 
-    pub fn from<'a>(contract_manager: &'a ContractManager, params: JsContractParameter) -> Result<Self> {
+    pub fn from(params: JsContractParameter) -> Result<Self> {
         catch_unwind(|| unsafe {
             let time = Local::now();
-            let custom_env: CustomEnv = CustomEnv::new(
-                params.network.into(),
-                self.id,
-                contract_manager
-            ).map_err(|e| Error::from_reason(format!("{:?}", e)))?;
+            let custom_env: CustomEnv = CustomEnv::new(params.network.into())
+                .map_err(|e| Error::from_reason(format!("{:?}", e)))?;
 
             let runner: WasmerRunner;
 
             if let Some(bytecode) = params.bytecode {
-                runner = WasmerRunner::from_bytecode(
-                    &bytecode,
-                    params.max_gas,
-                    custom_env,
-                )
+                runner = WasmerRunner::from_bytecode(&bytecode, params.max_gas, custom_env)
                     .map_err(|e| Error::from_reason(format!("{:?}", e)))?;
             } else if let Some(serialized) = params.serialized {
-                runner = WasmerRunner::from_serialized(
-                    serialized,
-                    params.max_gas,
-                    custom_env,
-                )
+                runner = WasmerRunner::from_serialized(serialized, params.max_gas, custom_env)
                     .map_err(|e| Error::from_reason(format!("{:?}", e)))?;
             } else {
                 return Err(Error::from_reason("No bytecode or serialized data"));
             }
 
-            let contract = JsContract::from_runner(runner, contract_manager, params.max_gas)?;
+            let contract = JsContract::from_runner(runner, params.max_gas)?;
             log_time_diff(&time, "JsContract::from");
 
             Ok(contract)
         })
-            .unwrap_or_else(|e| Err(Error::from_reason(format!("{:?}", e))))
+        .unwrap_or_else(|e| Err(Error::from_reason(format!("{:?}", e))))
     }
 
-    fn from_runner<'a>(
-        runner: WasmerRunner,
-        contract_manager: &'a ContractManager,
-        max_gas: u64
-    ) -> Result<Self> {
-        //catch_unwind(|| {
+    fn from_runner(runner: WasmerRunner, max_gas: u64) -> Result<Self> {
         let time = Local::now();
 
         let runner = Arc::new(Mutex::new(runner));
@@ -107,36 +79,20 @@ impl JsContract {
         Ok(Self {
             id: 1,
             runner,
-            contract_manager,
             contract: Arc::new(Mutex::new(contract)),
         })
-        //})
-        //    .unwrap_or_else(|e| Err(Error::from_reason(format!("{:?}", e)))
-        //    )
     }
 
     pub fn serialize(&self) -> Result<Bytes> {
-        catch_unwind(|| {
-            let runner = self.runner.clone();
-            let runner = runner.lock().map_err(|e| Error::from_reason(format!("{:?}", e)))?;
-            let serialized = runner.serialize().map_err(|e| Error::from_reason(format!("{:?}", e)))?;
+        let runner = self.runner.clone();
+        let runner = runner
+            .lock()
+            .map_err(|e| Error::from_reason(format!("{:?}", e)))?;
+        let serialized = runner
+            .serialize()
+            .map_err(|e| Error::from_reason(format!("{:?}", e)))?;
 
-            Ok(serialized)
-        })
-            .unwrap_or_else(|e| Err(Error::from_reason(format!("{:?}", e))))
-    }
-
-    pub fn destroy(&mut self, env: Env) -> Result<()> {
-        //catch_unwind(|| {
-        abort_tsfn!(self.contract_manager.storage_load_tsfn, &env);
-        abort_tsfn!(self.contract_manager.storage_store_tsfn, &env);
-        abort_tsfn!(self.contract_manager.call_other_contract_tsfn, &env);
-        abort_tsfn!(self.contract_manager.deploy_from_address_tsfn, &env);
-        abort_tsfn!(self.contract_manager.console_log_tsfn, &env);
-
-        Ok(())
-        //})
-        //    .unwrap_or_else(|e| Err(Error::from_reason(format!("{:?}", e))))
+        Ok(serialized)
     }
 
     pub fn call(
@@ -173,7 +129,7 @@ impl JsContract {
 
             Ok(result)
         })
-            .unwrap_or_else(|e| Err(Error::from_reason(format!("{:?}", e))))
+        .unwrap_or_else(|e| Err(Error::from_reason(format!("{:?}", e))))
     }
 
     pub fn read_memory(&self, offset: BigInt, length: BigInt) -> Result<Buffer> {
@@ -191,7 +147,7 @@ impl JsContract {
 
             Ok(Buffer::from(resp))
         })
-            .unwrap_or_else(|e| Err(Error::from_reason(format!("{:?}", e))))
+        .unwrap_or_else(|e| Err(Error::from_reason(format!("{:?}", e))))
     }
 
     pub fn write_memory(&self, offset: BigInt, data: Buffer) -> Result<Undefined> {
@@ -205,7 +161,7 @@ impl JsContract {
 
             Ok(())
         })
-            .unwrap_or_else(|e| Err(Error::from_reason(format!("{:?}", e))))
+        .unwrap_or_else(|e| Err(Error::from_reason(format!("{:?}", e))))
     }
 
     pub fn get_used_gas(&self) -> Result<BigInt> {
@@ -218,7 +174,7 @@ impl JsContract {
 
             Ok(BigInt::from(gas))
         })
-            .unwrap_or_else(|e| Err(Error::from_reason(format!("{:?}", e))))
+        .unwrap_or_else(|e| Err(Error::from_reason(format!("{:?}", e))))
     }
 
     pub fn set_used_gas(&self, gas: BigInt) -> Result<()> {
@@ -230,7 +186,7 @@ impl JsContract {
 
             Ok(())
         })
-            .unwrap_or_else(|e| Err(Error::from_reason(format!("{:?}", e))))
+        .unwrap_or_else(|e| Err(Error::from_reason(format!("{:?}", e))))
     }
 
     pub fn get_remaining_gas(&self) -> Result<BigInt> {
@@ -243,7 +199,7 @@ impl JsContract {
 
             Ok(BigInt::from(gas))
         })
-            .unwrap_or_else(|e| Err(Error::from_reason(format!("{:?}", e))))
+        .unwrap_or_else(|e| Err(Error::from_reason(format!("{:?}", e))))
     }
 
     pub fn set_remaining_gas(&self, gas: BigInt) -> Result<()> {
@@ -257,7 +213,7 @@ impl JsContract {
 
             Ok(())
         })
-            .unwrap_or_else(|e| Err(Error::from_reason(format!("{:?}", e))))
+        .unwrap_or_else(|e| Err(Error::from_reason(format!("{:?}", e))))
     }
 
     pub fn use_gas(&self, gas: BigInt) -> Result<()> {
@@ -271,7 +227,7 @@ impl JsContract {
 
             Ok(())
         })
-            .unwrap_or_else(|e| Err(Error::from_reason(format!("{:?}", e))))
+        .unwrap_or_else(|e| Err(Error::from_reason(format!("{:?}", e))))
     }
 
     pub fn write_buffer(&self, value: Buffer, id: i32, align: u32) -> Result<i64> {
@@ -286,7 +242,7 @@ impl JsContract {
 
             Ok(result)
         })
-            .unwrap_or_else(|e| Err(Error::from_reason(format!("{:?}", e))))
+        .unwrap_or_else(|e| Err(Error::from_reason(format!("{:?}", e))))
     }
 
     pub fn get_abort_data(&self) -> Result<AbortDataResponse> {
@@ -299,7 +255,7 @@ impl JsContract {
 
             result.ok_or(Error::from_reason("No abort data")).into()
         })
-            .unwrap_or_else(|e| Err(Error::from_reason(format!("{:?}", e))))
+        .unwrap_or_else(|e| Err(Error::from_reason(format!("{:?}", e))))
     }
 }
 
