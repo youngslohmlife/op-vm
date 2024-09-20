@@ -4,6 +4,7 @@ use napi::bindgen_prelude::{AsyncTask, BigInt, Buffer, Undefined};
 use napi::threadsafe_function::{ErrorStrategy, ThreadsafeFunction};
 use napi::{Env, Error, JsFunction, JsNumber};
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use crate::interfaces::napi::bitcoin_network_request::BitcoinNetworkRequest;
 use crate::interfaces::napi::js_contract::JsContract;
@@ -32,19 +33,37 @@ macro_rules! abort_tsfn {
     };
 }
 
+#[derive(Clone)]
+pub struct Functions {
+    pub storage_load_tsfn:
+        ThreadsafeFunction<ThreadSafeJsImportResponse, ErrorStrategy::CalleeHandled>,
+    pub storage_store_tsfn:
+        ThreadsafeFunction<ThreadSafeJsImportResponse, ErrorStrategy::CalleeHandled>,
+    pub call_other_contract_tsfn:
+        ThreadsafeFunction<ThreadSafeJsImportResponse, ErrorStrategy::CalleeHandled>,
+    pub deploy_from_address_tsfn:
+        ThreadsafeFunction<ThreadSafeJsImportResponse, ErrorStrategy::CalleeHandled>,
+    pub console_log_tsfn:
+        ThreadsafeFunction<ThreadSafeJsImportResponse, ErrorStrategy::CalleeHandled>,
+}
+
+impl Functions {
+    pub fn destroy(&mut self, env: Env) -> anyhow::Result<()> {
+        abort_tsfn!(self.storage_load_tsfn, env);
+        abort_tsfn!(self.storage_store_tsfn, env);
+        abort_tsfn!(self.console_log_tsfn, env);
+        abort_tsfn!(self.deploy_from_address_tsfn, env);
+        abort_tsfn!(self.call_other_contract_tsfn, env);
+        Ok(())
+    }
+}
+
 #[napi(js_name = "ContractManager")]
 pub struct ContractManager {
     contracts: HashMap<u64, JsContract>,
     contract_cache: HashMap<String, Bytes>,
     next_id: u64,
-    storage_load_tsfn: ThreadsafeFunction<ThreadSafeJsImportResponse, ErrorStrategy::CalleeHandled>,
-    storage_store_tsfn:
-        ThreadsafeFunction<ThreadSafeJsImportResponse, ErrorStrategy::CalleeHandled>,
-    call_other_contract_tsfn:
-        ThreadsafeFunction<ThreadSafeJsImportResponse, ErrorStrategy::CalleeHandled>,
-    deploy_from_address_tsfn:
-        ThreadsafeFunction<ThreadSafeJsImportResponse, ErrorStrategy::CalleeHandled>,
-    console_log_tsfn: ThreadsafeFunction<ThreadSafeJsImportResponse, ErrorStrategy::CalleeHandled>,
+    functions: Arc<Functions>,
 }
 
 #[napi]
@@ -74,21 +93,18 @@ impl ContractManager {
             contracts: HashMap::new(),
             contract_cache: HashMap::new(),
             next_id: 1, // Start the ID counter at 1 (or 0, if preferred)
-            storage_load_tsfn: create_tsfn!(storage_load_js_function),
-            storage_store_tsfn: create_tsfn!(storage_store_js_function),
-            call_other_contract_tsfn: create_tsfn!(call_other_contract_js_function),
-            deploy_from_address_tsfn: create_tsfn!(deploy_from_address_js_function),
-            console_log_tsfn: create_tsfn!(console_log_js_function),
+            functions: Arc::new(Functions {
+                storage_load_tsfn: create_tsfn!(storage_load_js_function),
+                storage_store_tsfn: create_tsfn!(storage_store_js_function),
+                call_other_contract_tsfn: create_tsfn!(call_other_contract_js_function),
+                deploy_from_address_tsfn: create_tsfn!(deploy_from_address_js_function),
+                console_log_tsfn: create_tsfn!(console_log_js_function),
+            }),
         }
     }
 
-    pub fn destroy_tsfn(&mut self, env: Env) -> Result<(), Error> {
-        abort_tsfn!(self.storage_load_tsfn, env);
-        abort_tsfn!(self.storage_store_tsfn, env);
-        abort_tsfn!(self.call_other_contract_tsfn, env);
-        abort_tsfn!(self.deploy_from_address_tsfn, env);
-        abort_tsfn!(self.console_log_tsfn, env);
-        Ok(())
+    pub fn get_functions(&self) -> Arc<Functions> {
+        self.functions.clone()
     }
 
     #[napi]
@@ -124,7 +140,7 @@ impl ContractManager {
             params.bytecode = Some(bytecode);
         }
 
-        let js_contract: JsContract = JsContract::from(params)?;
+        let js_contract: JsContract = JsContract::from(self, params)?;
         if should_cache {
             let serialized = js_contract.serialize()?;
             self.contract_cache.insert(address, serialized);
@@ -138,29 +154,34 @@ impl ContractManager {
         JsContract::validate_bytecode(bytecode, max_gas)
     }
 
+    pub fn abort_all_tsfn(&mut self, env: Env) -> Result<(), Error> {
+        let res = Arc::try_unwrap(self.functions.clone());
+        match res {
+            Ok(mut functions) => {
+                functions.destroy(env);
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
     #[napi]
     pub fn destroy(&mut self, env: Env, id: BigInt) -> Result<bool, Error> {
-        //catch_unwind(|| {
         let id = id.get_u64().1;
 
-        self.destroy_tsfn(env)?;
+        if self.contracts.len() == 1 {
+            self.abort_all_tsfn(env)?;
+        }
 
         match self.contracts.remove(&id) {
             Some(_) => Ok(true),
             None => Ok(false),
         }
-        //})
-        //   .unwrap_or_else(|e| Err(Error::from_reason(format!("{:?}", e))))
     }
 
     #[napi]
     pub fn destroy_all(&mut self, env: Env) -> Result<(), Error> {
-        // for contract in self.contracts.values_mut() {
-        //     contract.destroy(env)?;
-        // }
-
-        self.destroy_tsfn(env);
-
+        self.abort_all_tsfn(env)?;
         self.contracts.clear();
         self.contract_cache.clear();
 
@@ -316,7 +337,7 @@ impl ContractManager {
 
     #[napi]
     pub fn clear(&mut self, env: Env) -> Result<(), Error> {
-        self.destroy_tsfn(env);
+        self.abort_all_tsfn(env)?;
         self.contracts.clear();
 
         Ok(())

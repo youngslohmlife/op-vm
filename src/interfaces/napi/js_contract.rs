@@ -14,12 +14,14 @@ use crate::application::contract::ContractService;
 use crate::domain::runner::{CustomEnv, WasmerRunner};
 use crate::domain::vm::log_time_diff;
 use crate::interfaces::napi::contract::JsContractParameter;
+use crate::interfaces::napi::js_contract_manager::{ContractManager, Functions};
 use crate::interfaces::{AbortDataResponse, ContractCallTask};
 
 pub struct JsContract {
     id: u64,
     runner: Arc<Mutex<WasmerRunner>>,
     contract: Arc<Mutex<ContractService>>,
+    functions: Arc<Functions>,
 }
 
 impl JsContract {
@@ -42,7 +44,7 @@ impl JsContract {
         .unwrap_or_else(|e| Err(Error::from_reason(format!("{:?}", e))))
     }
 
-    pub fn from(params: JsContractParameter) -> Result<Self> {
+    pub fn from(manager: &ContractManager, params: JsContractParameter) -> Result<Self> {
         catch_unwind(|| unsafe {
             let time = Local::now();
             let custom_env: CustomEnv = CustomEnv::new(params.network.into())
@@ -60,7 +62,7 @@ impl JsContract {
                 return Err(Error::from_reason("No bytecode or serialized data"));
             }
 
-            let contract = JsContract::from_runner(runner, params.max_gas)?;
+            let contract = JsContract::from_runner(manager, runner, params.max_gas)?;
             log_time_diff(&time, "JsContract::from");
 
             Ok(contract)
@@ -68,7 +70,7 @@ impl JsContract {
         .unwrap_or_else(|e| Err(Error::from_reason(format!("{:?}", e))))
     }
 
-    fn from_runner(runner: WasmerRunner, max_gas: u64) -> Result<Self> {
+    fn from_runner(manager: &ContractManager, runner: WasmerRunner, max_gas: u64) -> Result<Self> {
         let time = Local::now();
 
         let runner = Arc::new(Mutex::new(runner));
@@ -80,6 +82,7 @@ impl JsContract {
             id: 1,
             runner,
             contract: Arc::new(Mutex::new(contract)),
+            functions: manager.get_functions(),
         })
     }
 
