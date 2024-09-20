@@ -17,6 +17,11 @@ impl CustomEnv {
             instance: None,
             network,
             abort_data: None,
+            functions,
         })
+    }
+
+    pub fn get_functions(&self) -> Functions {
+        Arc::try_unwrap(self.functions.clone()).unwrap()
     }
 }

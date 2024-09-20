@@ -33,7 +33,13 @@ pub fn storage_load_import(
     ptr: u32,
 ) -> Result<u32, RuntimeError> {
     let (env, store) = context.data_and_store_mut();
-    external_import_with_param_and_return(env, store, &env.storage_load_external, ptr, LOAD_COST)
+    external_import_with_param_and_return(
+        env,
+        store,
+        &env.get_functions().storage_load,
+        ptr,
+        LOAD_COST,
+    )
 }
 
 pub fn storage_store_import(
@@ -41,7 +47,13 @@ pub fn storage_store_import(
     ptr: u32,
 ) -> Result<u32, RuntimeError> {
     let (env, store) = context.data_and_store_mut();
-    external_import_with_param_and_return(env, store, &env.storage_store_external, ptr, STORE_COST)
+    external_import_with_param_and_return(
+        env,
+        store,
+        &env.get_functions().storage_store,
+        ptr,
+        STORE_COST,
+    )
 }
 
 pub fn call_other_contract_import(
@@ -60,7 +72,8 @@ pub fn call_other_contract_import(
     let data = AssemblyScript::read_buffer(&store, &instance, ptr)
         .map_err(|_e| RuntimeError::new("Error lifting typed array"))?;
 
-    let result = &env.call_other_contract_external.execute(&data)?;
+    //TODO: change id
+    let result = &env.get_functions().call_other_contract.execute(0, &data)?;
 
     let call_execution_cost_bytes = &result[0..8];
     let response = &result[8..];
@@ -82,7 +95,7 @@ pub fn deploy_from_address_import(
     external_import_with_param_and_return(
         env,
         store,
-        &env.deploy_from_address_external,
+        &env.get_functions().deploy_from_address,
         ptr,
         DEPLOY_COST,
     )
@@ -176,7 +189,7 @@ pub fn console_log_import(
     let data = AssemblyScript::read_buffer(&store, &instance, ptr)
         .map_err(|_e| RuntimeError::new("Error lifting typed array"))?;
 
-    env.console_log_external.execute(0, &data)
+    env.get_functions().console_log.execute(&data)
 }
 
 fn external_import_with_param_and_return(
@@ -196,7 +209,8 @@ fn external_import_with_param_and_return(
     let data = AssemblyScript::read_buffer(&mut store, &instance, ptr)
         .map_err(|_e| RuntimeError::new("Error lifting typed array"))?;
 
-    let result = external_function.execute(&data)?;
+    //TODO: change id here
+    let result = external_function.execute(0, &data)?;
 
     let value = AssemblyScript::write_buffer(&mut store, &instance, &result, 13, 0)
         .map_err(|_e| RuntimeError::new("Error writing buffer"))?;

@@ -9,9 +9,13 @@ use std::sync::Arc;
 use crate::interfaces::napi::bitcoin_network_request::BitcoinNetworkRequest;
 use crate::interfaces::napi::js_contract::JsContract;
 use crate::interfaces::napi::thread_safe_js_import_response::ThreadSafeJsImportResponse;
-use crate::interfaces::{AbortDataResponse, ContractCallTask};
+use crate::interfaces::{AbortDataResponse, ContractCallTask, ExternalFunction};
 
 use super::contract::JsContractParameter;
+use super::{
+    CallOtherContractExternalFunction, ConsoleLogExternalFunction,
+    DeployFromAddressExternalFunction, StorageLoadExternalFunction, StorageStoreExternalFunction,
+};
 
 #[macro_export]
 macro_rules! create_tsfn {
@@ -35,25 +39,56 @@ macro_rules! abort_tsfn {
 
 #[derive(Clone)]
 pub struct Functions {
-    pub storage_load_tsfn:
-        ThreadsafeFunction<ThreadSafeJsImportResponse, ErrorStrategy::CalleeHandled>,
-    pub storage_store_tsfn:
-        ThreadsafeFunction<ThreadSafeJsImportResponse, ErrorStrategy::CalleeHandled>,
-    pub call_other_contract_tsfn:
-        ThreadsafeFunction<ThreadSafeJsImportResponse, ErrorStrategy::CalleeHandled>,
-    pub deploy_from_address_tsfn:
-        ThreadsafeFunction<ThreadSafeJsImportResponse, ErrorStrategy::CalleeHandled>,
-    pub console_log_tsfn:
-        ThreadsafeFunction<ThreadSafeJsImportResponse, ErrorStrategy::CalleeHandled>,
+    pub storage_load: StorageLoadExternalFunction,
+    pub storage_store: StorageStoreExternalFunction,
+    pub call_other_contract: CallOtherContractExternalFunction,
+    pub deploy_from_address: DeployFromAddressExternalFunction,
+    pub console_log: ConsoleLogExternalFunction,
+}
+
+impl std::fmt::Debug for Functions {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Functions").finish()
+    }
 }
 
 impl Functions {
+    pub fn new(
+        storage_load_tsfn: ThreadsafeFunction<
+            ThreadSafeJsImportResponse,
+            ErrorStrategy::CalleeHandled,
+        >,
+        storage_store_tsfn: ThreadsafeFunction<
+            ThreadSafeJsImportResponse,
+            ErrorStrategy::CalleeHandled,
+        >,
+        call_other_contract_tsfn: ThreadsafeFunction<
+            ThreadSafeJsImportResponse,
+            ErrorStrategy::CalleeHandled,
+        >,
+        deploy_from_address_tsfn: ThreadsafeFunction<
+            ThreadSafeJsImportResponse,
+            ErrorStrategy::CalleeHandled,
+        >,
+        console_log_tsfn: ThreadsafeFunction<
+            ThreadSafeJsImportResponse,
+            ErrorStrategy::CalleeHandled,
+        >,
+    ) -> Self {
+        Functions {
+            storage_load: StorageLoadExternalFunction::new(storage_load_tsfn),
+            storage_store: StorageStoreExternalFunction::new(storage_store_tsfn),
+            call_other_contract: CallOtherContractExternalFunction::new(call_other_contract_tsfn),
+            deploy_from_address: DeployFromAddressExternalFunction::new(deploy_from_address_tsfn),
+            console_log: ConsoleLogExternalFunction::new(console_log_tsfn),
+        }
+    }
     pub fn destroy(&mut self, env: Env) -> anyhow::Result<()> {
-        abort_tsfn!(self.storage_load_tsfn, env);
-        abort_tsfn!(self.storage_store_tsfn, env);
-        abort_tsfn!(self.console_log_tsfn, env);
-        abort_tsfn!(self.deploy_from_address_tsfn, env);
-        abort_tsfn!(self.call_other_contract_tsfn, env);
+        abort_tsfn!(self.storage_load.external_function.tsfn, env);
+        abort_tsfn!(self.storage_store.external_function.tsfn, env);
+        abort_tsfn!(self.console_log.tsfn, env);
+        abort_tsfn!(self.deploy_from_address.external_function.tsfn, env);
+        abort_tsfn!(self.call_other_contract.external_function.tsfn, env);
         Ok(())
     }
 }
@@ -93,13 +128,13 @@ impl ContractManager {
             contracts: HashMap::new(),
             contract_cache: HashMap::new(),
             next_id: 1, // Start the ID counter at 1 (or 0, if preferred)
-            functions: Arc::new(Functions {
-                storage_load_tsfn: create_tsfn!(storage_load_js_function),
-                storage_store_tsfn: create_tsfn!(storage_store_js_function),
-                call_other_contract_tsfn: create_tsfn!(call_other_contract_js_function),
-                deploy_from_address_tsfn: create_tsfn!(deploy_from_address_js_function),
-                console_log_tsfn: create_tsfn!(console_log_js_function),
-            }),
+            functions: Arc::new(Functions::new(
+                create_tsfn!(storage_load_js_function),
+                create_tsfn!(storage_store_js_function),
+                create_tsfn!(call_other_contract_js_function),
+                create_tsfn!(deploy_from_address_js_function),
+                create_tsfn!(console_log_js_function),
+            )),
         }
     }
 

@@ -6,8 +6,9 @@ use wasmer::RuntimeError;
 use crate::interfaces::napi::thread_safe_js_import_response::ThreadSafeJsImportResponse;
 use crate::interfaces::ExternalFunction;
 
+#[derive(Clone)]
 pub struct GenericExternalFunction {
-    tsfn: ThreadsafeFunction<ThreadSafeJsImportResponse, ErrorStrategy::CalleeHandled>,
+    pub tsfn: ThreadsafeFunction<ThreadSafeJsImportResponse, ErrorStrategy::CalleeHandled>,
 }
 
 impl GenericExternalFunction {

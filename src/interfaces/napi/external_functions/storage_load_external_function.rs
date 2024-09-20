@@ -5,8 +5,9 @@ use crate::interfaces::napi::external_functions::GenericExternalFunction;
 use crate::interfaces::napi::thread_safe_js_import_response::ThreadSafeJsImportResponse;
 use crate::interfaces::ExternalFunction;
 
+#[derive(Clone)]
 pub struct StorageLoadExternalFunction {
-    external_function: GenericExternalFunction,
+    pub external_function: GenericExternalFunction,
 }
 
 impl StorageLoadExternalFunction {

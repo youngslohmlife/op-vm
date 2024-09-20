@@ -3,8 +3,9 @@ use wasmer::RuntimeError;
 
 use crate::interfaces::napi::thread_safe_js_import_response::ThreadSafeJsImportResponse;
 
+#[derive(Clone)]
 pub struct ConsoleLogExternalFunction {
-    tsfn: ThreadsafeFunction<ThreadSafeJsImportResponse, ErrorStrategy::CalleeHandled>,
+    pub tsfn: ThreadsafeFunction<ThreadSafeJsImportResponse, ErrorStrategy::CalleeHandled>,
 }
 
 impl ConsoleLogExternalFunction {
@@ -23,7 +24,8 @@ impl ConsoleLogExternalFunction {
 
         //let time = chrono::offset::Local::now();
 
-        self.tsfn.call(Ok(request), ThreadsafeFunctionCallMode::NonBlocking);
+        self.tsfn
+            .call(Ok(request), ThreadsafeFunctionCallMode::NonBlocking);
 
         //log_time_diff(&time, "GenericExternalFunction::log");
 
