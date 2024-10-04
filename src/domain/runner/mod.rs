@@ -4,10 +4,10 @@ pub use self::{
 };
 
 mod abort_data;
+mod bitcoin_network;
+mod constants;
 mod contract_runner;
 mod custom_env;
 mod import_functions;
 mod instance_wrapper;
 mod wasmer_runner;
-mod bitcoin_network;
-mod constants;

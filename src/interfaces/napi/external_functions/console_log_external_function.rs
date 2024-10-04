@@ -27,7 +27,8 @@ impl ConsoleLogExternalFunction {
 
         //let time = chrono::offset::Local::now();
 
-        self.tsfn.call(Ok(request), ThreadsafeFunctionCallMode::NonBlocking);
+        self.tsfn
+            .call(Ok(request), ThreadsafeFunctionCallMode::NonBlocking);
 
         //log_time_diff(&time, "GenericExternalFunction::log");
 

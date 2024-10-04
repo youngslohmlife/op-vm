@@ -14,7 +14,7 @@ impl StorageStoreExternalFunction {
         id: u64,
     ) -> Self {
         Self {
-            external_function: GenericExternalFunction::new(tsfn, id)
+            external_function: GenericExternalFunction::new(tsfn, id),
         }
     }
 }
@@ -29,7 +29,6 @@ impl ExternalFunction for StorageStoreExternalFunction {
         resp
     }
 }
-
 
 /*pub struct StorageStoreExternalFunction {
     tsfn: ThreadsafeFunction<ThreadSafeJsImportResponse, ErrorStrategy::CalleeHandled>,

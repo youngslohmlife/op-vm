@@ -36,9 +36,7 @@ impl ExternalFunction for GenericExternalFunction {
 
             let promise = response?;
 
-            let data = promise
-                .await
-                .map_err(|e| RuntimeError::new(e.reason))?;
+            let data = promise.await.map_err(|e| RuntimeError::new(e.reason))?;
 
             let data = data.to_vec();
 

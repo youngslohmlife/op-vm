@@ -16,7 +16,10 @@ impl ContractService {
     }
 
     pub fn call(&mut self, function: &str, params: &[Value]) -> anyhow::Result<Box<[Value]>> {
-        let mut runner = self.runner.lock().map_err(|_| anyhow::anyhow!("Failed to lock runner"))?;
+        let mut runner = self
+            .runner
+            .lock()
+            .map_err(|_| anyhow::anyhow!("Failed to lock runner"))?;
         let response = runner.call(function, params).map_err(|e| {
             if e.to_string().contains("unreachable") {
                 let gas_used = runner.get_remaining_gas();
